@@ -8,6 +8,7 @@ target_link_libraries(catch_main PUBLIC Catch2::Catch2)
 #target_link_libraries(catch_main PRIVATE project_options)
 
 set(wmp_test_suite_srcs
+    "src/mpsc.cpp"
     "src/oneshot.cpp")
 add_executable(wmp_test_suite ${wmp_test_suite_srcs})
 target_link_libraries(wmp_test_suite PRIVATE catch_main wmp)

@@ -22,4 +22,4 @@ ninja
 
 ### Testing
 
-The `catch2` unit testing library is used to write tests against `wmp`. One the test suite is built, run the tests with `ctest`.
+The `catch2` unit testing library is used to write tests against `wmp`. Once the test suite is built, run the tests with `ctest`.
