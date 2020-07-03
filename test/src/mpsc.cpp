@@ -59,3 +59,22 @@ TEST_CASE("wmp::mpsc sender explicit clone()")
     REQUIRE(v2.has_value());
     REQUIRE(v2.value() == value);
 }
+
+TEST_CASE("wmp::mpsc sender send_timeout() expiration")
+{
+    using namespace std::chrono_literals;
+
+    auto [tx, rx] = mpsc::create<uint8_t>(1);
+    auto tx2 = tx.clone();
+
+    auto const value = 42;
+
+    // first send() should succeed because buffer has available capacity
+    auto const r1 = tx.send_timeout(value, 100ms);
+    REQUIRE(mpsc::send_result::success == r1);
+
+    // second send() should fail because buffer no longer has available capacity;
+    // timeout should expire
+    auto const r2 = tx.send_timeout(value, 100ms);
+    REQUIRE(mpsc::send_result::timeout == r2);
+}

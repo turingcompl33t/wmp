@@ -71,6 +71,7 @@ namespace wmp::mpsc
             return sender{m_inner};
         }
 
+        // send() - blocking send operation (indefinite timeout)
         auto send(T value) -> send_result
         {
             using wmp::detail::unique_srw;
@@ -92,34 +93,54 @@ namespace wmp::mpsc
             return send_result::success;
         }
 
-        // template <typename Duration>
-        // auto send_timeout(T value, Duration timeout) -> send_result
-        // {
-        //     using wmp::detail::unique_srw;
-        //     using wmp::detail::srw_acquire;
+        // send_timeout() - blocking send operation with timeout
+        template <typename Duration>
+        auto send_timeout(T value, Duration timeout) -> send_result
+        {
+            using namespace std::chrono;
+            using wmp::detail::unique_srw;
+            using wmp::detail::srw_acquire;
 
-        //     auto const ms = std::chrono::duration_cast<std::chrono::milliseconds>(timeout);
+            auto const ms = static_cast<unsigned long>(
+                duration_cast<milliseconds>(timeout).count());
 
-        //     {
-        //         auto lock = unique_srw{&m_inner->lock, srw_acquire::exclusive};
+            auto error = ERROR_SUCCESS;
+
+            {
+                auto lock = unique_srw{&m_inner->lock, srw_acquire::exclusive};
                 
-        //         // block until we acquire exclusive access on nonfull buffer
-        //         while (m_inner->buffer.size() >= m_inner->capacity)
-        //         {
-        //             ::SleepConditionVariableSRW(
-        //                 &m_inner->nonfull, 
-        //                 &m_inner->lock, 
-        //                 static_cast<unsigned long>(ms.count()),  // narrow
-        //                 0);
-        //         }
+                // block until we acquire exclusive access on nonfull buffer
+                while (m_inner->buffer.size() >= m_inner->capacity && error != ERROR_TIMEOUT)
+                {
+                    if (!::SleepConditionVariableSRW(
+                        &m_inner->nonfull, 
+                        &m_inner->lock, 
+                        ms,
+                        0))
+                    {
+                        error = ::GetLastError();
+                    }
+                }
 
-        //         m_inner->buffer.push(value);
-        //     }
+                if (ERROR_SUCCESS == error)
+                {
+                    // successfully acquired exclusive access to nonfull buffer
+                    m_inner->buffer.push(value);
+                }
+            }
 
-        //     ::WakeConditionVariable(&m_inner->nonempty);
-        //     return send_result::success;
-        // }
+            if (ERROR_SUCCESS == error)
+            {
+                ::WakeConditionVariable(&m_inner->nonempty);
+                return send_result::success;
+            }
+            else
+            {
+                return send_result::timeout;
+            }
+        }
 
+        // try_send() - non-blocking send operation
         auto try_send(T value) -> send_result
         {
             using wmp::detail::scoped_srw;
@@ -166,7 +187,7 @@ namespace wmp::mpsc
         receiver(receiver&&)            = default;
         receiver& operator=(receiver&&) = default;
 
-        // recv() - indefinite blocking receive operation
+        // recv() - blocking receive operation (indefinite timeout)
         auto recv() -> std::optional<T>
         {
             using wmp::detail::unique_srw;
@@ -191,12 +212,49 @@ namespace wmp::mpsc
             return value;
         }
 
-        // // recv_timeout() - blocking receive operation with timeout
-        // template <typename Duration>
-        // auto recv_timeout(Duration timeout) -> std::optional<T>
-        // {
+        // recv_timeout() - blocking receive operation with timeout
+        template <typename Duration>
+        auto recv_timeout(Duration timeout) -> std::optional<T>
+        {
+            using namespace std::chrono;
+            using wmp::detail::unique_srw;
+            using wmp::detail::srw_acquire;
 
-        // }
+            auto ms = static_cast<unsigned long>(
+                duration_cast<milliseconds>(timeout).count());
+
+            auto value = std::optional<T>{};  // std::nullopt 
+            auto error = ERROR_SUCCESS;
+
+            {
+                auto lock = unique_srw{&m_inner->lock, srw_acquire::exclusive};
+                while (m_inner->buffer.size() == 0 && error != ERROR_TIMEOUT)
+                {
+                    if (!::SleepConditionVariableSRW(
+                        &m_inner->nonempty,
+                        &m_inner->lock,
+                        ms,
+                        0))
+                    {
+                        error = ::GetLastError();
+                    }
+
+                    if (ERROR_SUCCESS == error)
+                    {
+                        // successfully acquired exclusive access to nonempty buffer
+                        value.emplace(m_inner->buffer.front());
+                        m_inner->buffer.pop();
+                    }
+                }
+            }
+
+            if (ERROR_SUCCESS == error)
+            {
+                ::WakeConditionVariable(&m_inner->nonfull);
+            }
+
+            return value;
+        }
 
         // try_recv() - non-blocking receive operation
         auto try_recv() -> std::optional<T>
