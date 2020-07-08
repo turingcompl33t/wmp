@@ -25,17 +25,10 @@ namespace wmp::detail
     public:
         unique_srw(PSRWLOCK lock, srw_acquire ownership)
             : m_lock{lock}
-            , m_state{state::locked}
+            , m_state{state::unlocked}
             , m_ownership{ownership}
         {
-            if (srw_acquire::exclusive == m_ownership)
-            {
-                ::AcquireSRWLockExclusive(m_lock);
-            }
-            else
-            {
-                ::ReleaseSRWLockExclusive(m_lock);
-            }
+            acquire();
         }
 
         ~unique_srw()
@@ -50,15 +43,34 @@ namespace wmp::detail
         unique_srw(unique_srw const&)            = delete;
         unique_srw& operator=(unique_srw const&) = delete;
 
-        // movable
+        // move-constructible
+        // QUESTION: can this be defaulted?
         unique_srw(unique_srw&& other) noexcept
-        {
-            // TODO
-        }
+            : m_lock{other.m_lock}
+            , m_state{other.m_state}
+            , m_ownership{other.m_ownership}
+        {}
 
+        // move-assignable
+        // QUESTION: can this be defaulted?
         unique_srw& operator=(unique_srw&& rhs) noexcept
         {
-            // TODO
+            if (this != &rhs)
+            {
+                if (owns_lock())
+                {
+                    release();
+                }
+
+                m_lock      = rhs.m_lock;
+                m_state     = rhs.m_state;
+                m_ownership = rhs.m_ownership;
+
+                rhs.m_lock  = nullptr;
+                rhs.m_state = state::unlocked;
+            }
+
+            return *this;
         }
 
         auto lock() -> void
@@ -97,6 +109,8 @@ namespace wmp::detail
             {
                 ::AcquireSRWLockShared(m_lock);
             }
+
+            m_state = state::locked;
         }
 
         auto release() -> void
@@ -109,6 +123,8 @@ namespace wmp::detail
             {
                 ::ReleaseSRWLockShared(m_lock);
             }
+
+            m_state = state::unlocked;
         }
     };
 }
